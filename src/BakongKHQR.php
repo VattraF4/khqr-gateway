@@ -115,13 +115,61 @@ class BakongKHQR
 
     public static function generateIndividual(IndividualInfo $individualInfo): \KHQR\Models\KHQRResponse
     {
+        // 1. Generate base KHQR
         $khqr = self::generateKHQR($individualInfo, KHQRData::MERCHANT_TYPE_INDIVIDUAL);
+
+        // 2. If it is a Dynamic QR (has amount or expiration timestamp), inject Tag 99
+        if ($individualInfo->expirationTimestamp || $individualInfo->amount > 0) {
+            // Strip the trailing "6304XXXX" CRC checksum from the generated string
+            if (substr($khqr, -8, 4) === '6304') {
+                $baseKhqr = substr($khqr, 0, -8);
+            } else {
+                $baseKhqr = $khqr;
+            }
+
+            $createdMs = (string) (time() * 1000);
+            $expiryMs = (string) ($individualInfo->expirationTimestamp ?? ((time() + 900) * 1000));
+
+            // Sub-tag 00 = Created timestamp (13-digit ms)
+            // Sub-tag 01 = Expiration timestamp (13-digit ms)
+            $subtag00 = '00' . str_pad((string) strlen($createdMs), 2, '0', STR_PAD_LEFT) . $createdMs;
+            $subtag01 = '01' . str_pad((string) strlen($expiryMs), 2, '0', STR_PAD_LEFT) . $expiryMs;
+            $tag99Value = $subtag00 . $subtag01;
+            $tag99 = '99' . str_pad((string) strlen($tag99Value), 2, '0', STR_PAD_LEFT) . $tag99Value;
+
+            // Re-append CRC prefix 6304 and recalculate checksum
+            $payload = $baseKhqr . $tag99 . '6304';
+            $khqr = $payload . self::calculateCRC16($payload);
+        }
+
         $result = [
             'qr' => $khqr,
             'md5' => md5($khqr),
         ];
 
         return new KHQRResponse($result, null);
+    }
+
+    /**
+     * EMVCo standard CRC16-CCITT (0xFFFF)
+     */
+    private static function calculateCRC16(string $data): string
+    {
+        $crc = 0xFFFF;
+        $len = strlen($data);
+
+        for ($i = 0; $i < $len; $i++) {
+            $crc ^= (ord($data[$i]) << 8);
+            for ($j = 0; $j < 8; $j++) {
+                if (($crc & 0x8000) !== 0) {
+                    $crc = (($crc << 1) ^ 0x1021) & 0xFFFF;
+                } else {
+                    $crc = ($crc << 1) & 0xFFFF;
+                }
+            }
+        }
+
+        return strtoupper(str_pad(dechex($crc), 4, '0', STR_PAD_LEFT));
     }
 
     public static function generateMerchant(MerchantInfo $merchantInfo): \KHQR\Models\KHQRResponse
