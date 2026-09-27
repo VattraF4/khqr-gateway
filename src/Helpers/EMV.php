@@ -123,5 +123,5 @@ final class EMV
 
     public const INVALID_LENGTH_MERCHANT_CITY_ALTERNATE_LANGUAGE = 15;
 
-    public const LANGUAGE_PREFERENCE_EXP = 01;
+    public const LANGUAGE_PREFERENCE_EXP = '01';
 }
